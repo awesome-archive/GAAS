@@ -5,6 +5,9 @@
 #include <vector>
 
 // DBoW2/3
+#include <glog/logging.h>
+// DBoW2/3
+
 #include "DBoW3.h" // defines OrbVocabulary and OrbDatabase
 
 // OpenCV
@@ -86,6 +89,10 @@ public:
         
         this->mIndex++;
     }
+    inline int getCurrentIndex()
+    {
+        return this->mIndex;
+    }
     
     
     inline void addFrame(const SceneFrame& frame)
@@ -126,6 +133,13 @@ public:
     {
         cout << "scene saving started!" << endl;
 
+        //size_t mIndex = 0;
+        //std::vector<std::vector<cv::KeyPoint> > vec_p2d;
+        //std::vector<std::vector<cv::Point3d> > vec_p3d;
+        //std::vector <cv::Mat> point_desps;
+        //vector<cv::Mat> mVecR;
+        //vector<cv::Mat> mVecT;
+
         ar & mIndex;
         ar & hasScale;
         ar & vec_p2d;
@@ -161,7 +175,6 @@ public:
     }
     /////////////////////////////////// serialization////////////////////////////////////
 
-
     inline cv::Mat getR(size_t index)
     {
         return this->mVecR[index];
@@ -174,12 +187,11 @@ public:
 
     bool hasScale = false;
 
-
 public:
 
     size_t mIndex = 0;
-    std::vector<std::vector<cv::KeyPoint>> vec_p2d;
-    std::vector<std::vector <cv::Point3d>> vec_p3d;
+    std::vector<std::vector<cv::KeyPoint> > vec_p2d;
+    std::vector<std::vector<cv::Point3d> > vec_p3d;
     std::vector <cv::Mat> point_desps;
     
     vector<cv::Mat> mVecR;
@@ -189,7 +201,6 @@ public:
     
     cv::Mat m_RT_Scene_Fix = cv::Mat::eye(4,4,CV_32F);//fix 3d pose of scene.
 
-    //pcl::PointCloud<pcl::PointXYZRGBA>::Ptr point_cloud_of_scene; //Take care:this cloud is not required, so do not use it in any algorithm.
 };
 
 
@@ -354,17 +365,38 @@ public:
     //SceneRetriever(Scene& original_scene_input);
     SceneRetriever(const string&voc,const std::string& scene_file);
     
-    int retrieveSceneWithScaleFromMonoImage(cv::Mat image_in_rect, cv::Mat& cameraMatrix, cv::Mat& RT_mat_of_mono_cam_output, bool& match_success);
+    float retrieveSceneWithScaleFromMonoImage(cv::Mat image_in_rect, cv::Mat& cameraMatrix, cv::Mat& RT_mat_of_mono_cam_output, bool& match_success,int* pMatchedIndexID_output = nullptr);
+    float retrieveSceneFromStereoImage(cv::Mat& image_left_rect, cv::Mat& image_right_rect,
+                                                       cv::Mat& Q_mat, cv::Mat& RT_mat_of_stereo_cam_output, bool& match_success,int* pMatchedIndexID_output = nullptr);
+    inline int addFrameToScene(const std::vector<cv::KeyPoint>& points2d_in, const std::vector<cv::Point3d>points3d_in,const cv::Mat& point_desp_in, const cv::Mat R, const cv::Mat t)
+    {
+        if(!this->ploop_closing_manager_of_scene )
+        {
+            LOG(ERROR)<<"Calling addFrameToScene() without initiated loop closing manager!"<<endl;
+            return -1;
+        }
+        this->original_scene.addFrame(points2d_in,points3d_in,point_desp_in,R,t);
+        struct FrameInfo* pfr = new struct FrameInfo;
+        pfr->keypoints = this->original_scene.getP2D()[this->original_scene.getCurrentIndex()];
+        pfr->descriptors = this->original_scene.getDespByIndex(original_scene.getCurrentIndex());
+        cout<<"pfr->keypoints size: "<<pfr->keypoints.size()<<endl;
+        cout<<"pfr->descriptors size: "<<pfr->descriptors.size()<<endl;
+        ptr_frameinfo frame_info(pfr);
+        this->ploop_closing_manager_of_scene->addKeyFrame(frame_info);
+        LOG(INFO)<<"addFrameToScene() successfully!";
+        return 0;
+    }
+
     
-    int retrieveSceneWithMultiStereoCam(const std::vector<cv::Mat> leftCams,const std::vector<cv::Mat> rightCams,
+    
+    float retrieveSceneWithMultiStereoCam(const std::vector<cv::Mat> leftCams,const std::vector<cv::Mat> rightCams,
                                         std::vector<cv::Mat> RT_pose_of_stereo_cams,
                                         cv::Mat &RT_mat_of_multi_stereo_cam_output,
-                                        bool &match_success
+                                        bool &match_success,
+                                        int* pMatchedIndexID_output = nullptr
                                         );
     
-    int retrieveSceneWithMultiMonoCam(const std::vector<cv::Mat> images,std::vector<cv::Mat> RT_pose_of_mono_cams,cv::Mat &RT_mat_of_multi_mono_cam_output,bool& match_success);
-    
-    int retrieveSceneFromStereoImage(cv::Mat& image_left_rect, cv::Mat& image_right_rect, cv::Mat& Q_mat, cv::Mat& RT_mat_of_stereo_cam_output, bool& match_success);
+    float retrieveSceneWithMultiMonoCam(const std::vector<cv::Mat> images,std::vector<cv::Mat> RT_pose_of_mono_cams,cv::Mat &RT_mat_of_multi_mono_cam_output,bool& match_success,int* pMatchedIndexID_output = nullptr);
 
     void debugVisualize();//visualize pointcloud and cam pose.
 
@@ -380,10 +412,31 @@ public:
 
     void displayFeatureMatches(size_t loop_index, ptr_frameinfo& current_frame, std::vector<cv::DMatch> matches);
 
+    inline vector<cv::Point3f> pts3dto3f(vector<cv::Point3d>& input_pts)
+    {
+        vector<cv::Point3f> result;
+        cv::Point3f pts3f;
+        for(auto& pts3d : input_pts)
+        {
+            pts3f.x = pts3d.x;
+            pts3f.y = pts3d.y;
+            pts3f.z = pts3d.z;
+            result.emplace_back(pts3d.x, pts3d.y, pts3d.z);
+
+//            cout<<"pts3dto3f: "<<result[result.size()]<<endl;
+        }
+        return result;
+    }
+
     void publishPoseHistory();
 
     size_t LoopClosureDebugIndex = 0;
 
+
+    inline Scene& getScene()
+    {
+        return this->original_scene;
+    }
 
 private:
 

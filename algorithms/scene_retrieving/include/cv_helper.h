@@ -15,6 +15,7 @@
 #include <pcl/registration/gicp.h>
 #include <pcl/conversions.h>
 #include <pcl/PCLPointCloud2.h>
+#include <pcl/filters/filter.h>
 
 #include <Eigen/Core>
 #include <opencv2/core/eigen.hpp>
@@ -316,7 +317,6 @@ public:
         std::vector<unsigned char> PyrLKResults;
         std::vector<float> err;
         std::vector<cv::Point2f> PyrLKmatched_points;
-
         cv::calcOpticalFlowPyrLK(image_left_rect,
                                  image_right_rect,
                                  InputKeypoints,
@@ -339,6 +339,8 @@ public:
             }
         }
 
+        //step 5, given pts2f, disps, R and t, compute mps
+        Camera_pts_left = this->image2cam(matched_points, disparity_of_points);
 
         //step 5, given pts2f, disps, R and t, compute mps
         Camera_pts_left = this->image2cam(matched_points, disparity_of_points);
@@ -674,7 +676,7 @@ public:
     // a wrapper for pcl::GeneralizedIterativeClosestPoint to return the transformation matrix between a input point cloud and a
     // target point cloud
     // input points cloud size should be greater than 20
-    int GeneralICP(vector<cv::Point3f>& input_cloud, vector<cv::Point3f>& target_cloud, Eigen::Matrix4f& result, int num_iter = 50, double transformationEpsilon = 1e-8)
+    float GeneralICP(vector<cv::Point3f>& input_cloud, vector<cv::Point3f>& target_cloud, Eigen::Matrix4f& result, int num_iter = 50, double transformationEpsilon = 1e-8)
     {
 
         cout<<"cv helper::GeneralICP points size: "<<input_cloud.size()<<", "<<target_cloud.size()<<endl;
@@ -690,6 +692,28 @@ public:
         pcl::PointCloud<PointT>::Ptr tgt (new pcl::PointCloud<PointT>);
         pcl::PointCloud<PointT> tgt_cloud = this->PtsVec2PointCloud(target_cloud);
         *tgt = tgt_cloud;
+
+        std::vector<int> indices_1, indices_2;
+        pcl::removeNaNFromPointCloud(*src, *src, indices_1);
+        pcl::removeNaNFromPointCloud(*tgt, *tgt, indices_2);
+
+        for(auto& pt : src->points)
+        {
+          if (pt.x ==0 || pt.y ==0 || pt.z ==0 || !pcl::isFinite(pt) ||
+              abs(pt.x) > 1e6 || abs(pt.y) > 1e6 || abs(pt.z) > 1e6)
+          {
+            return 100;
+          }
+        }
+
+        for(auto& pt : tgt->points)
+        {
+          if ( pt.x ==0 || pt.y ==0 ||pt.z ==0 || !pcl::isFinite(pt) ||
+               abs(pt.x) > 1e6 || abs(pt.y) > 1e6 || abs(pt.z) > 1e6)
+          {
+            return 100;
+          }
+        }
 
         // define output point cloud
         pcl::PointCloud<PointT> output;
@@ -712,10 +736,10 @@ public:
         cout<<"GeneralICP::transformation matrix: \n"<<transformation<<endl;
 
         result = transformation;
+        return reg.getFitnessScore();
 
-
-        vector<int> Indices = *(reg.getIndices());
-        return Indices.size();
+//        vector<int> Indices = *(reg.getIndices());
+//        return Indices.size();
     }
 
     //not implemented
